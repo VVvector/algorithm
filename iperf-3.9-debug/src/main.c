@@ -93,11 +93,15 @@ main(int argc, char **argv)
         err("couldn't change CPU affinity");
 #endif
 
+	/* 初始化测试的相关参数 */
     test = iperf_new_test();
     if (!test)
         iperf_errexit(NULL, "create new test error - %s", iperf_strerror(i_errno));
+
+	/* 设置默认参数 */
     iperf_defaults(test);	/* sets defaults */
 
+	/* 解析测试命令参数 */
     if (iperf_parse_arguments(test, argc, argv) < 0) {
         iperf_err(test, "parameter error - %s", iperf_strerror(i_errno));
         fprintf(stderr, "\n");
@@ -105,9 +109,11 @@ main(int argc, char **argv)
         exit(1);
     }
 
+	/* 开始进行测试 */
     if (run(test) < 0)
         iperf_errexit(test, "error - %s", iperf_strerror(i_errno));
 
+	/* 测试结束，free测试的相关资源*/
     iperf_free_test(test);
 
     return 0;
@@ -138,6 +144,7 @@ run(struct iperf_test *test)
     signal(SIGPIPE, SIG_IGN);
 
     switch (test->role) {
+	/* server模式 */
         case 's':
 	    if (test->daemon) {
 		int rc;
@@ -171,6 +178,8 @@ run(struct iperf_test *test)
             }
 	    iperf_delete_pidfile(test);
             break;
+
+	/* client模式 */
 	case 'c':
 	    if (iperf_run_client(test) < 0)
 		iperf_errexit(test, "error - %s", iperf_strerror(i_errno));

@@ -66,6 +66,12 @@ iperf_create_streams(struct iperf_test *test, int sender)
         test->bind_port = orig_bind_port;
 	if (orig_bind_port)
 	    test->bind_port += i;
+
+	/* connect socket，即根据tcp和udp 调用不同的api。
+	tcp: iperf_tcp_connect()
+	udp: iperf_udp_connect()
+	*/
+	MY_DEBUG("create a new test stream, protocol->connect()....\n");
         if ((s = test->protocol->connect(test)) < 0)
             return -1;
 
@@ -255,14 +261,21 @@ iperf_handle_message_client(struct iperf_test *test)
         }
     }
 
+	MY_DEBUG("client handle server message: test->state:%d\n", test->state);
+
     switch (test->state) {
+
         case PARAM_EXCHANGE:
+		MY_DEBUG("PARAM_EXCHANGE message\n\n");
             if (iperf_exchange_parameters(test) < 0)
                 return -1;
+		/* 实际执行   iperf_on_connect */
             if (test->on_connect)
                 test->on_connect(test);
             break;
+
         case CREATE_STREAMS:
+		MY_DEBUG("CREATE_STREAMS message\n\n");
             if (test->mode == BIDIRECTIONAL)
             {
                 if (iperf_create_streams(test, 1) < 0)
@@ -273,7 +286,9 @@ iperf_handle_message_client(struct iperf_test *test)
             else if (iperf_create_streams(test, test->mode) < 0)
                 return -1;
             break;
+
         case TEST_START:
+		MY_DEBUG("TEST_START message\n\n");
             if (iperf_init_test(test) < 0)
                 return -1;
             if (create_client_timers(test) < 0)
@@ -284,20 +299,30 @@ iperf_handle_message_client(struct iperf_test *test)
 		if (iperf_create_send_timers(test) < 0)
 		    return -1;
             break;
+
         case TEST_RUNNING:
+		MY_DEBUG("TEST_RUNNING message\n\n");
             break;
+
         case EXCHANGE_RESULTS:
+		MY_DEBUG("EXCHANGE_RESULTS message\n\n");
             if (iperf_exchange_results(test) < 0)
                 return -1;
             break;
+
         case DISPLAY_RESULTS:
+		MY_DEBUG("DISPLAY_RESULTS message\n\n");
             if (test->on_test_finish)
                 test->on_test_finish(test);
             iperf_client_end(test);
             break;
+
         case IPERF_DONE:
+		MY_DEBUG("IPERF_DONE message\n\n");
             break;
+
         case SERVER_TERMINATE:
+		MY_DEBUG("SERVER_TERMINATE message\n\n");
             i_errno = IESERVERTERM;
 
 	    /*
@@ -310,10 +335,14 @@ iperf_handle_message_client(struct iperf_test *test)
 	    test->reporter_callback(test);
 	    test->state = oldstate;
             return -1;
+
         case ACCESS_DENIED:
+		MY_DEBUG("ACCESS_DENIED message\n\n");
             i_errno = IEACCESSDENIED;
             return -1;
+
         case SERVER_ERROR:
+		MY_DEBUG("SERVER_ERROR message\n\n");
             if (Nread(test->ctrl_sck, (char*) &err, sizeof(err), Ptcp) < 0) {
                 i_errno = IECTRLREAD;
                 return -1;
@@ -325,6 +354,7 @@ iperf_handle_message_client(struct iperf_test *test)
             }
             errno = ntohl(err);
             return -1;
+
         default:
             i_errno = IEMESSAGE;
             return -1;
@@ -344,10 +374,18 @@ iperf_connect(struct iperf_test *test)
 
     make_cookie(test->cookie);
 
+	/*新建一个control test的通道，用于传输一些控制信息，可以看到使用的是 TCP 协议。
+	即在用iperf3测试udp时，也会有一条tcp流用于传输control信息。
+	*/
     /* Create and connect the control channel */
-    if (test->ctrl_sck < 0)
+    if (test->ctrl_sck < 0) {
 	// Create the control channel using an ephemeral port
 	test->ctrl_sck = netdial(test->settings->domain, Ptcp, test->bind_address, 0, test->server_hostname, test->server_port, test->settings->connect_timeout);
+
+	MY_DEBUG("create a TCP control channel: bind_address:%s, server_hostname:%s, server_port:%d\n",
+		test->bind_address, test->server_hostname, test->server_port);
+    }
+    
     if (test->ctrl_sck < 0) {
         i_errno = IECONNECT;
         return -1;
@@ -489,6 +527,7 @@ iperf_run_client(struct iperf_test * test)
 	iflush(test);
     }
 
+	/* 新建一条TCP流，用于传输控制信息。 */
     /* Start the client and connect to the server */
     if (iperf_connect(test) < 0)
         goto cleanup_and_fail;
@@ -503,15 +542,13 @@ iperf_run_client(struct iperf_test * test)
 	memcpy(&write_set, &test->write_set, sizeof(fd_set));
 	iperf_time_now(&now);
 	timeout = tmr_timeout(&now);
-
-	if (timeout)
-		MY_DEBUG("timeout: %ld, %ld\n", timeout->tv_sec, timeout->tv_usec);
-		
 	result = select(test->max_fd + 1, &read_set, &write_set, NULL, timeout);
 	if (result < 0 && errno != EINTR) {
   	    i_errno = IESELECT;
 	    goto cleanup_and_fail;
 	}
+
+	/* 根据从control channle获取的server信息来进行动作，例如：更新测试参数，新建测试流，测试结果等。 */
 	if (result > 0) {
 	    if (FD_ISSET(test->ctrl_sck, &read_set)) {
  	        if (iperf_handle_message_client(test) < 0) {
@@ -537,6 +574,7 @@ iperf_run_client(struct iperf_test * test)
 	    }
 
 
+	MY_DEBUG("one round test start!\n");
 		/* 双向模式 */
 	    if (test->mode == BIDIRECTIONAL)
 	    {
@@ -558,7 +596,7 @@ iperf_run_client(struct iperf_test * test)
                     goto cleanup_and_fail;
 	    }
 
-		MY_DEBUG("send done!\n");
+		MY_DEBUG("one round test done!\n\n");
 
 		/* 计算timer是否到期， 如果到期，就执行相关的timer函数。例如，统计和显示的timer*/
             /* Run the timers. */

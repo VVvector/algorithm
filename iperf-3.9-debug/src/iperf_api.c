@@ -1585,17 +1585,22 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
     else
         multisend = 1;	/* nope */
 
-    MY_DEBUG("burst=%d, rate=%" PRIu64 ", multisend=%d\n", test->settings->burst,
-	    test->settings->rate, multisend);
+    MY_DEBUG("****** one iperf send: burst=%d, rate(-b)=%" PRIu64 "bps, multisend=%d, socket_bufsize(-w)=%d bytes, blksize(-l)=%d bytes ******\n",
+    	test->settings->burst, test->settings->rate, multisend, test->settings->socket_bufsize, test->settings->blksize);
 
-    /* default设置： burst=0, rate=0, multisend=10, no_throttle_check=0 */
+	/* default设置：
+	TCP:
+		burst=0, rate=0, multisend=10
+	UDP:
+		burst=0, rate=1Mbps, multisend=1
+	*/
     for (; multisend > 0; --multisend) {
 	if (test->settings->rate != 0 && test->settings->burst == 0)
 	    iperf_time_now(&now);
 	streams_active = 0;
 	SLIST_FOREACH(sp, &test->streams, streams) {
 
-		MY_DEBUG("green_light=%d, multisend=%d, settings->bytes=%" PRIu64 ", bytes_sent=%" PRIu64 ", settings->blocks=%" PRIu64 ", blocks_send=%" PRIu64 "\n",
+		MY_DEBUG("** green_light=%d, multisend=%d, settings->bytes=%" PRIu64 ", bytes_sent=%" PRIu64 ", settings->blocks=%" PRIu64 ", blocks_send=%" PRIu64 "**\n",
 			sp->green_light, multisend, test->settings->bytes, test->bytes_sent,
 			test->settings->blocks, test->blocks_sent);
 	    if ((sp->green_light && sp->sender &&
@@ -1615,6 +1620,9 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
 
 		/* 总共发送的blocks数 */
 		++test->blocks_sent;
+
+		/* 在设置了速率(-b) 和 不是burst的情况下(burst模式：设置了-b xxx / packet的情况下。)：
+			对比实际的发送速率与设置速率，如果小于设置速率，则绿灯亮，即可继续发送数据；否则，不能发送数据。 */
 		iperf_check_throttle(sp, &now);
 		if (multisend > 1 && test->settings->bytes != 0 && test->bytes_sent >= test->settings->bytes)
 		    break;

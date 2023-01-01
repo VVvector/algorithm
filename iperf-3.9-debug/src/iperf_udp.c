@@ -498,6 +498,7 @@ iperf_udp_connect(struct iperf_test *test)
 #endif
     int rc;
 
+    MY_DEBUG("create a new UDP stream\n");
     /* Create and bind our local socket. */
     if ((s = netdial(test->settings->domain, Pudp, test->bind_address, test->bind_port, test->server_hostname, test->server_port, -1)) < 0) {
         i_errno = IESTREAMCONNECT;
