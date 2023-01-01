@@ -1519,7 +1519,12 @@ iperf_check_throttle(struct iperf_stream *sp, struct iperf_time *nowP)
 
     if (sp->test->done || sp->test->settings->rate == 0 || sp->test->settings->burst != 0)
         return;
+
+	/* start_time_fixed 时间戳是在 iperf_init_test() 设置，即在开始测试的时间。
+	 * 即这里计算当前与开始测试时的时间差，在用总共发送的数据量去除，可得到实际测试速率。
+	 */
     iperf_time_diff(&sp->result->start_time_fixed, nowP, &temp_time);
+    
     seconds = iperf_time_in_secs(&temp_time);
     bits_per_second = sp->result->bytes_sent * 8 / seconds;
     if (bits_per_second < sp->test->settings->rate) {
@@ -1606,7 +1611,7 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
 	    if ((sp->green_light && sp->sender &&
 		 (write_setP == NULL || FD_ISSET(sp->socket, write_setP)))) {
 
-		/* 这里调用时机的tcp或者udp的send函数 */
+		/* 这里调用实际的tcp或者udp的send函数 */
 		if ((r = sp->snd(sp)) < 0) {
 		    if (r == NET_SOFTERROR)
 			break;
@@ -1621,7 +1626,7 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
 		/* 总共发送的blocks数 */
 		++test->blocks_sent;
 
-		/* 在设置了速率(-b) 和 不是burst的情况下(burst模式：设置了-b xxx / packet的情况下。)：
+		/* 在设置了速率(-b) 和 非burst的情况下(burst模式：设置了-b xxx / packet的情况下。)：
 			对比实际的发送速率与设置速率，如果小于设置速率，则绿灯亮，即可继续发送数据；否则，不能发送数据。 */
 		iperf_check_throttle(sp, &now);
 		if (multisend > 1 && test->settings->bytes != 0 && test->bytes_sent >= test->settings->bytes)
@@ -1684,6 +1689,8 @@ iperf_init_test(struct iperf_test *test)
 	i_errno = IEINITTEST;
 	return -1;
     }
+
+    /* 设置流测试的起始时间。 */
     SLIST_FOREACH(sp, &test->streams, streams) {
 	sp->result->start_time = sp->result->start_time_fixed = now;
     }
