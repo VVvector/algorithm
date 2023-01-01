@@ -121,6 +121,8 @@ test_timer_proc(TimerClientData client_data, struct iperf_time *nowP)
 {
     struct iperf_test *test = client_data.p;
 
+	MY_DEBUG("start\n");
+
     test->timer = NULL;
     test->done = 1;
 }
@@ -129,6 +131,8 @@ static void
 client_stats_timer_proc(TimerClientData client_data, struct iperf_time *nowP)
 {
     struct iperf_test *test = client_data.p;
+
+	MY_DEBUG("start\n");
 
     if (test->done)
         return;
@@ -140,6 +144,8 @@ static void
 client_reporter_timer_proc(TimerClientData client_data, struct iperf_time *nowP)
 {
     struct iperf_test *test = client_data.p;
+
+	MY_DEBUG("start\n");
 
     if (test->done)
         return;
@@ -191,6 +197,9 @@ client_omit_timer_proc(TimerClientData client_data, struct iperf_time *nowP)
 
     test->omit_timer = NULL;
     test->omitting = 0;
+
+	MY_DEBUG("start\n");
+
     iperf_reset_stats(test);
     if (test->verbose && !test->json_output && test->reporter_interval == 0)
         iperf_printf(test, "%s", report_omit_done);
@@ -207,6 +216,8 @@ create_client_omit_timer(struct iperf_test * test)
 {
     struct iperf_time now;
     TimerClientData cd;
+
+	MY_DEBUG("start\n");
 
     if (test->omit == 0) {
 	test->omit_timer = NULL;
@@ -454,6 +465,8 @@ iperf_run_client(struct iperf_test * test)
     struct timeval* timeout = NULL;
     struct iperf_stream *sp;
 
+	MY_DEBUG("start\n");
+
     if (test->logfile)
         if (iperf_open_logfile(test) < 0)
             return -1;
@@ -483,12 +496,17 @@ iperf_run_client(struct iperf_test * test)
     /* Begin calculating CPU utilization */
     cpu_util(NULL);
 
+	/* 开始进行测试 */
     startup = 1;
     while (test->state != IPERF_DONE) {
 	memcpy(&read_set, &test->read_set, sizeof(fd_set));
 	memcpy(&write_set, &test->write_set, sizeof(fd_set));
 	iperf_time_now(&now);
 	timeout = tmr_timeout(&now);
+
+	if (timeout)
+		MY_DEBUG("timeout: %ld, %ld\n", timeout->tv_sec, timeout->tv_usec);
+		
 	result = select(test->max_fd + 1, &read_set, &write_set, NULL, timeout);
 	if (result < 0 && errno != EINTR) {
   	    i_errno = IESELECT;
@@ -503,6 +521,7 @@ iperf_run_client(struct iperf_test * test)
 	    }
 	}
 
+	/* 进行发包uplink或者收包downlink测试 */
 	if (test->state == TEST_RUNNING) {
 
 	    /* Is this our first time really running? */
@@ -518,23 +537,30 @@ iperf_run_client(struct iperf_test * test)
 	    }
 
 
+		/* 双向模式 */
 	    if (test->mode == BIDIRECTIONAL)
 	    {
                 if (iperf_send(test, &write_set) < 0)
                     goto cleanup_and_fail;
                 if (iperf_recv(test, &read_set) < 0)
                     goto cleanup_and_fail;
+
+		/* uplink 发送 */
 	    } else if (test->mode == SENDER) {
                 // Regular mode. Client sends.
                 if (iperf_send(test, &write_set) < 0)
                     goto cleanup_and_fail;
+
+		/* downlink 接收 */
 	    } else {
                 // Reverse mode. Client receives.
                 if (iperf_recv(test, &read_set) < 0)
                     goto cleanup_and_fail;
 	    }
 
+		MY_DEBUG("send done!\n");
 
+		/* 计算timer是否到期， 如果到期，就执行相关的timer函数。例如，统计和显示的timer*/
             /* Run the timers. */
             iperf_time_now(&now);
             tmr_run(&now);

@@ -126,6 +126,9 @@ sigend_handler(int sig)
 static int
 run(struct iperf_test *test)
 {
+
+	MY_DEBUG("start\n");
+
     /* Termination signals. */
     iperf_catch_sigend(sigend_handler);
     if (setjmp(sigend_jmp_buf))

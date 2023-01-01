@@ -1585,13 +1585,23 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
     else
         multisend = 1;	/* nope */
 
+    MY_DEBUG("burst=%d, rate=%" PRIu64 ", multisend=%d\n", test->settings->burst,
+	    test->settings->rate, multisend);
+
+    /* default设置： burst=0, rate=0, multisend=10, no_throttle_check=0 */
     for (; multisend > 0; --multisend) {
 	if (test->settings->rate != 0 && test->settings->burst == 0)
 	    iperf_time_now(&now);
 	streams_active = 0;
 	SLIST_FOREACH(sp, &test->streams, streams) {
+
+		MY_DEBUG("green_light=%d, multisend=%d, settings->bytes=%" PRIu64 ", bytes_sent=%" PRIu64 ", settings->blocks=%" PRIu64 ", blocks_send=%" PRIu64 "\n",
+			sp->green_light, multisend, test->settings->bytes, test->bytes_sent,
+			test->settings->blocks, test->blocks_sent);
 	    if ((sp->green_light && sp->sender &&
 		 (write_setP == NULL || FD_ISSET(sp->socket, write_setP)))) {
+
+		/* 这里调用时机的tcp或者udp的send函数 */
 		if ((r = sp->snd(sp)) < 0) {
 		    if (r == NET_SOFTERROR)
 			break;
@@ -1599,7 +1609,11 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
 		    return r;
 		}
 		streams_active = 1;
+
+		/* 总共发送的字节数 */
 		test->bytes_sent += r;
+
+		/* 总共发送的blocks数 */
 		++test->blocks_sent;
 		iperf_check_throttle(sp, &now);
 		if (multisend > 1 && test->settings->bytes != 0 && test->bytes_sent >= test->settings->bytes)
@@ -2885,6 +2899,9 @@ iperf_stats_callback(struct iperf_test *test)
     iperf_size_t total_interval_bytes_transferred = 0;
 
     temp.omitted = test->omitting;
+
+    MY_DEBUG("start\n");
+
     SLIST_FOREACH(sp, &test->streams, streams) {
         rp = sp->result;
 	temp.bytes_transferred = sp->sender ? rp->bytes_sent_this_interval : rp->bytes_received_this_interval;
@@ -3663,6 +3680,9 @@ iperf_print_results(struct iperf_test *test)
 void
 iperf_reporter_callback(struct iperf_test *test)
 {
+
+	MY_DEBUG("state:%d\n", test->state);
+
     switch (test->state) {
         case TEST_RUNNING:
         case STREAM_RUNNING:

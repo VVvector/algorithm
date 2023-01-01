@@ -65,6 +65,8 @@
 #include "net.h"
 #include "timer.h"
 
+#include "iperf.h"
+
 /*
  * Declaration of gerror in iperf_error.c.  Most other files in iperf3 can get this
  * by including "iperf.h", but net.c lives "below" this layer.  Clearly the
@@ -358,6 +360,8 @@ Nwrite(int fd, const char *buf, size_t count, int prot)
 #if (EAGAIN != EWOULDBLOCK)
 		case EWOULDBLOCK:
 #endif
+		
+		MY_DEBUG("ret=%d, sent=%lu\n", errno, count - nleft);
 		return count - nleft;
 
 		case ENOBUFS:
@@ -371,6 +375,9 @@ Nwrite(int fd, const char *buf, size_t count, int prot)
 	nleft -= r;
 	buf += r;
     }
+
+	MY_DEBUG("sent=%lu\n", count);
+
     return count;
 }
 

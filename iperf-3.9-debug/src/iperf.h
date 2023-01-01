@@ -401,4 +401,12 @@ struct iperf_test
 
 extern int gerror; /* error value from getaddrinfo(3), for use in internal error handling */
 
+#define __DEBUG__ 1
+#ifdef __DEBUG__
+#define MY_DEBUG(format,...) printf("#"__FILE__"-%05d-%s():" format, __LINE__, __func__, ##__VA_ARGS__)
+#else
+#define MY_DEBUG(format,...)
+#endif
+
+
 #endif /* !__IPERF_H */

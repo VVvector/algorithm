@@ -96,6 +96,10 @@ iperf_tcp_send(struct iperf_stream *sp)
     sp->result->bytes_sent += r;
     sp->result->bytes_sent_this_interval += r;
 
+	MY_DEBUG("sent %d bytes of %d, total %" PRIu64 " bytes_sent_this_interval=%" PRIu64 "\n",
+		r, sp->settings->blksize, sp->result->bytes_sent,
+		sp->result->bytes_sent_this_interval);
+
     if (sp->test->debug)
 	printf("sent %d bytes of %d, total %" PRIu64 "\n", r, sp->settings->blksize, sp->result->bytes_sent);
 
