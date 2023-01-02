@@ -1958,6 +1958,9 @@ send_parameters(struct iperf_test *test)
 #endif // HAVE_SSL
 	cJSON_AddStringToObject(j, "client_version", IPERF_VERSION);
 
+	char *str = cJSON_Print(j);
+	MY_DEBUG("client send control message to server: \n%s\n", str);
+
 	if (test->debug) {
 	    char *str = cJSON_Print(j);
 	    printf("send_parameters:\n%s\n", str);

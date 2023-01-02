@@ -279,7 +279,7 @@ iperf_handle_message_client(struct iperf_test *test)
 		MY_DEBUG("PARAM_EXCHANGE message\n\n");
             if (iperf_exchange_parameters(test) < 0)
                 return -1;
-		/* 实际执行   iperf_on_connect */
+		/* 打印log，实际执行   iperf_on_connect() */
             if (test->on_connect)
                 test->on_connect(test);
             break;
@@ -401,6 +401,7 @@ iperf_connect(struct iperf_test *test)
         return -1;
     }
 
+	/* 发送control message -- uuid */
     if (Nwrite(test->ctrl_sck, test->cookie, COOKIE_SIZE, Ptcp) < 0) {
         i_errno = IESENDCOOKIE;
         return -1;
@@ -412,6 +413,7 @@ iperf_connect(struct iperf_test *test)
     int opt;
     socklen_t len;
 
+	/* 获取tcp MSS */
     len = sizeof(opt);
     if (getsockopt(test->ctrl_sck, IPPROTO_TCP, TCP_MAXSEG, &opt, &len) < 0) {
         test->ctrl_sck_mss = 0;
