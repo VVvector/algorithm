@@ -357,11 +357,12 @@ Nwrite(int fd, const char *buf, size_t count, int prot)
 	    switch (errno) {
 		case EINTR:
 		case EAGAIN:
+
 #if (EAGAIN != EWOULDBLOCK)
 		case EWOULDBLOCK:
 #endif
 		
-		MY_DEBUG("ret=%d, sent=%lu\n", errno, count - nleft);
+		MY_DEBUG("ret=%d -- %s, sent=%lu\n", errno, strerror(errno), count - nleft);
 		return count - nleft;
 
 		case ENOBUFS:

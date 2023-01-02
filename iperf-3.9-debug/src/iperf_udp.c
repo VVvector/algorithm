@@ -213,6 +213,11 @@ int
 iperf_udp_send(struct iperf_stream *sp)
 {
     int r;
+
+	/* 注意：
+	* 1. 没有用-l指定，则会在iperf_connect()中根据control channel的mss来设定或者默认为1460.
+	* 2. 可用-l指定。最大不超过 MAX_UDP_BLOCKSIZE 。
+	*/
     int       size = sp->settings->blksize;
     struct iperf_time before;
 

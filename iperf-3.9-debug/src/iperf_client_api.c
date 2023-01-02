@@ -104,6 +104,9 @@ iperf_create_streams(struct iperf_test *test, int sender)
 	}
 #endif /* HAVE_TCP_CONGESTION */
 
+	/* 根据client的测试模式，将新建的流添加到相应的set中。
+	 * 有write set和read set。
+	 */
 	if (sender)
 	    FD_SET(s, &test->write_set);
 	else
@@ -173,20 +176,25 @@ create_client_timers(struct iperf_test * test)
     test->timer = test->stats_timer = test->reporter_timer = NULL;
     if (test->duration != 0) {
 	test->done = 0;
+	MY_DEBUG("create client test timers(-t + -O): usecs=%lld\n", ( test->duration + test->omit ) * SEC_TO_US);
         test->timer = tmr_create(&now, test_timer_proc, cd, ( test->duration + test->omit ) * SEC_TO_US, 0);
         if (test->timer == NULL) {
             i_errno = IEINITTEST;
             return -1;
 	}
-    } 
+    }
+
     if (test->stats_interval != 0) {
+    	MY_DEBUG("create client stats timers(-i): usecs=%lld\n", (unsigned long long)(test->stats_interval * SEC_TO_US));
         test->stats_timer = tmr_create(&now, client_stats_timer_proc, cd, test->stats_interval * SEC_TO_US, 1);
         if (test->stats_timer == NULL) {
             i_errno = IEINITTEST;
             return -1;
 	}
     }
+
     if (test->reporter_interval != 0) {
+    	MY_DEBUG("create client reporter timers(-i): usecs=%lld\n", (unsigned long long)(test->reporter_interval * SEC_TO_US));
         test->reporter_timer = tmr_create(&now, client_reporter_timer_proc, cd, test->reporter_interval * SEC_TO_US, 1);
         if (test->reporter_timer == NULL) {
             i_errno = IEINITTEST;
@@ -235,6 +243,8 @@ create_client_omit_timer(struct iperf_test * test)
 	}
 	test->omitting = 1;
 	cd.p = test;
+
+    	MY_DEBUG("create client omit timers(-O): usecs=%lld\n",  test->omit * SEC_TO_US);
 	test->omit_timer = tmr_create(&now, client_omit_timer_proc, cd, test->omit * SEC_TO_US, 0);
 	if (test->omit_timer == NULL) {
 	    i_errno = IEINITTEST;
@@ -382,7 +392,7 @@ iperf_connect(struct iperf_test *test)
 	// Create the control channel using an ephemeral port
 	test->ctrl_sck = netdial(test->settings->domain, Ptcp, test->bind_address, 0, test->server_hostname, test->server_port, test->settings->connect_timeout);
 
-	MY_DEBUG("create a TCP control channel: bind_address:%s, server_hostname:%s, server_port:%d\n",
+	MY_DEBUG("create a control channel(TCP stream): bind_address:%s, server_hostname:%s, server_port:%d\n",
 		test->bind_address, test->server_hostname, test->server_port);
     }
     
@@ -447,6 +457,10 @@ iperf_connect(struct iperf_test *test)
 	    else {
 		test->settings->blksize = DEFAULT_UDP_BLKSIZE;
 	    }
+
+	    MY_DEBUG("settings->blksize=%d; ctrl_sck_mss=%d, udp default blksize=%d\n",
+	    test->settings->blksize, test->ctrl_sck_mss, DEFAULT_UDP_BLKSIZE);
+
 	    if (test->verbose) {
 		printf("Setting UDP block size to %d\n", test->settings->blksize);
 	    }
@@ -462,6 +476,8 @@ iperf_connect(struct iperf_test *test)
 	    snprintf(str, sizeof(str),
 		     "UDP block size %d exceeds TCP MSS %d, may result in fragmentation / drops", test->settings->blksize, test->ctrl_sck_mss);
 	    warning(str);
+
+	    MY_DEBUG("UDP block size %d exceeds TCP MSS %d, may result in fragmentation / drops\n", test->settings->blksize, test->ctrl_sck_mss);
 	}
     }
 
@@ -536,19 +552,28 @@ iperf_run_client(struct iperf_test * test)
     cpu_util(NULL);
 
 	/* 开始进行测试 */
+    MY_DEBUG("**** client start run test ****\n\n");
     startup = 1;
     while (test->state != IPERF_DONE) {
+    	/* 初始化该client要监控的socket fd。 */
 	memcpy(&read_set, &test->read_set, sizeof(fd_set));
 	memcpy(&write_set, &test->write_set, sizeof(fd_set));
 	iperf_time_now(&now);
 	timeout = tmr_timeout(&now);
+
+	/* select()用于等待文件描述词状态的改变。
+	 * 当检测的fd状态有变化或者超时时，则返回。
+	 * 例如，当socket读缓冲区有数据时，则返回；当socket写缓冲区有空间时，则返回。
+	 */
 	result = select(test->max_fd + 1, &read_set, &write_set, NULL, timeout);
 	if (result < 0 && errno != EINTR) {
   	    i_errno = IESELECT;
 	    goto cleanup_and_fail;
 	}
 
-	/* 根据从control channle获取的server信息来进行动作，例如：更新测试参数，新建测试流，测试结果等。 */
+	/* 检测 control channle 是否有数据可读，会更近获取的server信息来进行动作，
+	 * 例如：更新测试参数，新建测试流，测试结果等。
+	 */
 	if (result > 0) {
 	    if (FD_ISSET(test->ctrl_sck, &read_set)) {
  	        if (iperf_handle_message_client(test) < 0) {
@@ -561,10 +586,15 @@ iperf_run_client(struct iperf_test * test)
 	/* 进行发包uplink或者收包downlink测试 */
 	if (test->state == TEST_RUNNING) {
 
+		/* 只在第一次测试时执行，设置socket的blocking模式。 */
 	    /* Is this our first time really running? */
 	    if (startup) {
 	        startup = 0;
 
+		/* 对应非udp，则设置的是none blocking模式。
+		 * 注意：
+		 * 无论是TCP还是UDP，默认情况下创建的都是阻塞模式（blocking）的套接字
+		 */
 		// Set non-blocking for non-UDP tests
 		if (test->protocol->id != Pudp) {
 		    SLIST_FOREACH(sp, &test->streams, streams) {
@@ -573,8 +603,7 @@ iperf_run_client(struct iperf_test * test)
 		}
 	    }
 
-
-	MY_DEBUG("one round test start!\n");
+		MY_DEBUG("one round test start!\n");
 		/* 双向模式 */
 	    if (test->mode == BIDIRECTIONAL)
 	    {
@@ -595,19 +624,25 @@ iperf_run_client(struct iperf_test * test)
                 if (iperf_recv(test, &read_set) < 0)
                     goto cleanup_and_fail;
 	    }
-
 		MY_DEBUG("one round test done!\n\n");
 
 		/* 计算timer是否到期， 如果到期，就执行相关的timer函数。例如，统计和显示的timer*/
             /* Run the timers. */
             iperf_time_now(&now);
+
+		/* 检查timer是否到期，如果到期则执行timer handler，并根据timer属性，看是否重新添加到timer list中。*/
             tmr_run(&now);
 
+		/* 检查测试是否完成：
+		 * 以测试时间(-t) 或者 测试传输的数据量(-n) 或者 测试传输的block(-k) 作为结束条件。
+		 */
 	    /* Is the test done yet? */
 	    if ((!test->omitting) &&
 	        ((test->duration != 0 && test->done) ||
 	         (test->settings->bytes != 0 && test->bytes_sent >= test->settings->bytes) ||
 	         (test->settings->blocks != 0 && test->blocks_sent >= test->settings->blocks))) {
+
+		MY_DEBUG("**** client end run test ****\n\n");
 
 		// Unset non-blocking for non-UDP tests
 		if (test->protocol->id != Pudp) {
@@ -623,6 +658,8 @@ iperf_run_client(struct iperf_test * test)
 		if (iperf_set_send_state(test, TEST_END) != 0)
                     goto cleanup_and_fail;
 	    }
+
+	/* 当client为receive模式下，并且测试结束，也要继续接收数据。*/
 	}
 	// If we're in reverse mode, continue draining the data
 	// connection(s) even if test is over.  This prevents a

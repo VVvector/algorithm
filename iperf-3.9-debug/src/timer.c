@@ -143,6 +143,7 @@ tmr_create(
     t->periodic = periodic;
     t->time = now;
     iperf_time_add_usecs(&t->time, usecs);
+
     /* Add the new timer to the active list. */
     list_add( t );
 
@@ -188,11 +189,17 @@ tmr_run( struct iperf_time* nowP )
 	*/
 	if (iperf_time_compare(&t->time, &now) > 0)
 	    break;
+
+	/* 如果timer到期了，就执行timer的handler */
 	(t->timer_proc)( t->client_data, &now );
+
+	/* 如果是周期性timer，则先从全局timer list删除，再重新添加到全局timers list中，并且重新排序。 */
 	if ( t->periodic ) {
 	    /* Reschedule. */
 	    iperf_time_add_usecs(&t->time, t->usecs);
 	    list_resort( t );
+
+	/* 如果不是周期性timer，就直接从timer list中删除。 */
 	} else
 	    tmr_cancel( t );
     }

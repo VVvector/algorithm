@@ -1425,6 +1425,8 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
 	i_errno = IEBLOCKSIZE;
 	return -1;
     }
+
+	/* blksize的有效性检查。 */
     if (test->protocol->id == Pudp &&
 	(blksize > 0 &&
 	    (blksize < MIN_UDP_BLOCKSIZE || blksize > MAX_UDP_BLOCKSIZE))) {
@@ -1517,6 +1519,7 @@ iperf_check_throttle(struct iperf_stream *sp, struct iperf_time *nowP)
     double seconds;
     uint64_t bits_per_second;
 
+	/* 测试结束 或者 rate为0（即没有指定-b）或者 burst模式，都不会用绿灯，即不会计算实际发送速率。*/
     if (sp->test->done || sp->test->settings->rate == 0 || sp->test->settings->burst != 0)
         return;
 
@@ -1582,32 +1585,36 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
     register struct iperf_stream *sp;
     struct iperf_time now;
 
+    /* default设置：
+     * TCP: burst=0, rate=0, multisend=10
+     * UDP: burst=0, rate=1Mbps, multisend=1
+     */
+
     /* Can we do multisend mode? */
+    /* 指定了burst模式， -b xx /n */
     if (test->settings->burst != 0)
         multisend = test->settings->burst;
+
+    /* 没有指定-b，例如，tcp默认就是0。iperf_defaults() */
     else if (test->settings->rate == 0)
-        multisend = test->multisend;
+        multisend = test->multisend; //10
+
+    /* 其他情况，都为1。 */
     else
         multisend = 1;	/* nope */
 
     MY_DEBUG("****** one iperf send: burst=%d, rate(-b)=%" PRIu64 "bps, multisend=%d, socket_bufsize(-w)=%d bytes, blksize(-l)=%d bytes ******\n",
     	test->settings->burst, test->settings->rate, multisend, test->settings->socket_bufsize, test->settings->blksize);
 
-	/* default设置：
-	TCP:
-		burst=0, rate=0, multisend=10
-	UDP:
-		burst=0, rate=1Mbps, multisend=1
-	*/
     for (; multisend > 0; --multisend) {
 	if (test->settings->rate != 0 && test->settings->burst == 0)
 	    iperf_time_now(&now);
 	streams_active = 0;
 	SLIST_FOREACH(sp, &test->streams, streams) {
-
 		MY_DEBUG("** green_light=%d, multisend=%d, settings->bytes=%" PRIu64 ", bytes_sent=%" PRIu64 ", settings->blocks=%" PRIu64 ", blocks_send=%" PRIu64 "**\n",
 			sp->green_light, multisend, test->settings->bytes, test->bytes_sent,
 			test->settings->blocks, test->blocks_sent);
+
 	    if ((sp->green_light && sp->sender &&
 		 (write_setP == NULL || FD_ISSET(sp->socket, write_setP)))) {
 
@@ -1627,7 +1634,7 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
 		++test->blocks_sent;
 
 		/* 在设置了速率(-b) 和 非burst的情况下(burst模式：设置了-b xxx / packet的情况下。)：
-			对比实际的发送速率与设置速率，如果小于设置速率，则绿灯亮，即可继续发送数据；否则，不能发送数据。 */
+			每次发送数据后，都要对比实际的发送速率与设置速率，如果小于设置速率，则绿灯亮，即可继续发送数据；否则，不能发送数据。 */
 		iperf_check_throttle(sp, &now);
 		if (multisend > 1 && test->settings->bytes != 0 && test->bytes_sent >= test->settings->bytes)
 		    break;
@@ -1638,12 +1645,16 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
 	if (!streams_active)
 	    break;
     }
+
+	/* 如果是burst模式，则只在一次burst发送完成后去计算发送速率，来决定是否可继续发送数据。 */
     if (test->settings->burst != 0) {
 	iperf_time_now(&now);
 	SLIST_FOREACH(sp, &test->streams, streams)
 	    if (sp->sender)
 	        iperf_check_throttle(sp, &now);
     }
+
+    /* 清除掉本次的写状态，用于下次select()检测是否可写状态。 */
     if (write_setP != NULL)
 	SLIST_FOREACH(sp, &test->streams, streams)
 	    if (FD_ISSET(sp->socket, write_setP))
@@ -1659,13 +1670,21 @@ iperf_recv(struct iperf_test *test, fd_set *read_setP)
     struct iperf_stream *sp;
 
     SLIST_FOREACH(sp, &test->streams, streams) {
+
+    	/* 检查哪些socket有数据可读。 */
 	if (FD_ISSET(sp->socket, read_setP) && !sp->sender) {
+
+		/* 从socket接收数据 */
 	    if ((r = sp->rcv(sp)) < 0) {
 		i_errno = IESTREAMREAD;
 		return r;
 	    }
 	    test->bytes_received += r;
 	    ++test->blocks_received;
+
+		/* 本次read结束，则清除掉该socket的read标志。
+		 * 等待下次select()的结果。
+		 */
 	    FD_CLR(sp->socket, read_setP);
 	}
     }
@@ -1728,6 +1747,8 @@ iperf_create_send_timers(struct iperf_test * test)
         sp->green_light = 1;
 	if (test->settings->rate != 0 && sp->sender) {
 	    cd.p = sp;
+
+	    MY_DEBUG("create send timers(--pacing-timer): usecs=%d\n",  test->settings->pacing_timer);
 	    sp->send_timer = tmr_create(NULL, send_timer_proc, cd, test->settings->pacing_timer, 1);
 	    if (sp->send_timer == NULL) {
 		i_errno = IEINITTEST;
